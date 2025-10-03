@@ -1,0 +1,38 @@
+name: ci-cd-aks
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build_push_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login ACR
+        run: az acr login -n ${{ secrets.ACR_NAME }}
+
+      - name: Build & Push image
+        run: |
+          IMAGE=${{ secrets.ACR_NAME }}.azurecr.io/myapp:${{ github.sha }}
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          docker build -t $IMAGE ./app
+          docker push $IMAGE
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ secrets.AKS_RG }}
+          cluster-name: ${{ secrets.AKS_NAME }}
+
+      - name: Deploy manifests
+        run: |
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl set image deploy/myapp myapp=$IMAGE
+          kubectl rollout status deploy/myapp --timeout=120s
